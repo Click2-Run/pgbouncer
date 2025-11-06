@@ -183,16 +183,6 @@ PG_SUPPORTS_SCRAM = PG_MAJOR_VERSION >= 10
 LIBPQ_SUPPORTS_PIPELINING = psycopg.pq.version() >= 140000
 
 
-def get_tls_support():
-    with open("../config.mak", encoding="utf-8") as f:
-        match = re.search(r"tls_support = (\w+)", f.read())
-        assert match is not None
-        return match.group(1) == "yes"
-
-
-TLS_SUPPORT = get_tls_support()
-
-
 def get_ldap_support():
     with open("../config.mak", encoding="utf-8") as f:
         match = re.search(r"ldap_support = (\w+)", f.read())
@@ -201,6 +191,18 @@ def get_ldap_support():
 
 
 LDAP_SUPPORT = get_ldap_support()
+
+
+def get_tls_support():
+    with open("../config.mak", encoding="utf-8") as f:
+        match = re.search(r"tls_support = (\w+)", f.read())
+        assert match is not None
+        return match.group(1) == "yes"
+
+
+TLS_SUPPORT = get_tls_support()
+DIRECT_TLS_SUPPORT = TLS_SUPPORT and PG_MAJOR_VERSION >= 17
+
 
 # this is out of ephemeral port range for many systems hence
 # it is a lower change that it will conflict with "in-use" ports
@@ -234,6 +236,9 @@ def cleanup_test_leftovers(*nodes):
 
     for node in nodes:
         node.cleanup_users()
+
+    for node in nodes:
+        node.reset_ini()
 
 
 class PortLock:
@@ -480,7 +485,7 @@ class QueryRunner:
                 assert match is not None
                 fw_token = match.group(1)
             sudo(
-                'bash -c "'
+                'sh -c "'
                 f"echo 'anchor \\\"port_{self.port}\\\"'"
                 f' | pfctl -a pgbouncer_test -f -"'
             )
@@ -504,7 +509,7 @@ class QueryRunner:
                 )
             elif BSD:
                 sudo(
-                    "bash -c '"
+                    "sh -c '"
                     f'echo "block drop out proto tcp from any to {self.host} port {self.port}"'
                     f"| pfctl -a pgbouncer_test/port_{self.port} -f -'"
                 )
@@ -539,7 +544,7 @@ class QueryRunner:
                 )
             elif BSD:
                 sudo(
-                    "bash -c '"
+                    "sh -c '"
                     f'echo "block return-rst out out proto tcp from any to {self.host} port {self.port}"'
                     f"| pfctl -a pgbouncer_test/port_{self.port} -f -'"
                 )
@@ -989,6 +994,9 @@ class Bouncer(QueryRunner):
 
                 ini.flush()
 
+        with self.ini_path.open("r") as ini:
+            self.original_ini_contents = ini.read()
+
     def base_command(self):
         """returns the basecommand that is used to run PgBouncer
 
@@ -1187,6 +1195,16 @@ class Bouncer(QueryRunner):
         """
         with self.ini_path.open("a") as f:
             f.write(config + "\n")
+
+    def reset_ini(self):
+        """Resets the PgBouncer config contents to their original state
+
+        Used to undo all config changes. To apply these changes PgBouncer
+        still needs to be reloaded or restarted. To reload in a cross platform
+        way you need can use admin("reload").
+        """
+        with self.ini_path.open("w") as f:
+            f.write(self.original_ini_contents)
 
     @contextmanager
     def log_contains(self, re_string, times=None):

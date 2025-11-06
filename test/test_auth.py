@@ -310,6 +310,19 @@ def test_scram_both(bouncer):
     bouncer.test(dbname="p62", user="scramuser1", password="foo")
 
 
+@pytest.mark.skipif("not PG_SUPPORTS_SCRAM")
+def test_scram_both_reauthentication_using_cache(bouncer):
+    bouncer.admin(f"set auth_type='scram-sha-256'")
+
+    # Make multiple connections to exercise the SCRAM secrets cache logic
+    for _ in range(1, 10):
+        # plain-text password in userlist.txt
+        bouncer.test(dbname="p61", user="scramuser3", password="baz")
+
+        # SCRAM password in userlist.txt
+        bouncer.test(dbname="p62", user="scramuser1", password="foo")
+
+
 @pytest.mark.skipif("WINDOWS", reason="Windows does not have SIGHUP")
 def test_auth_dbname_usage(
     bouncer,
@@ -1115,7 +1128,6 @@ def test_auth_user_at_db_level_with_same_forced_user(bouncer):
                 cur.execute("select 1")
 
 
-@pytest.mark.skipif("MACOS", reason="OpenLDAP on OSX is difficult")
 @pytest.mark.skipif("WINDOWS", reason="We do not expect to support ldap on Windows")
 @pytest.mark.skipif(not LDAP_SUPPORT, reason="pgbouncer is built without LDAP support")
 def test_ldap_auth(bouncer_with_openldap):
@@ -1265,7 +1277,7 @@ def test_ldap_auth(bouncer_with_openldap):
     # 10 test ldap auth_type
     bouncer_with_openldap.write_ini(f"auth_type = ldap")
     bouncer_with_openldap.write_ini(
-        f'auth_ldap_parameter = ldapurl="ldap://127.0.0.1:{openldap.ldap_port}/dc=example,dc=net?uid?sub"'
+        f'auth_ldap_options = ldapurl="ldap://127.0.0.1:{openldap.ldap_port}/dc=example,dc=net?uid?sub"'
     )
     bouncer_with_openldap.admin("reload")
     bouncer_with_openldap.test(user="ldapuser1", password="secret1")
